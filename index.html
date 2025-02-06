@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spline Editor with Scrollbars, Animation, and Editing</title>
+  <style>
+    body {
+      background: #222;
+      color: #eee;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    /* Container for canvas and scrollbars */
+    #canvasContainer {
+      position: relative;
+      width: 1200px;
+      height: 500px;
+      background: #333;
+      border: 1px solid #444;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+      margin-bottom: 10px;
+    }
+    canvas {
+      background: transparent;
+      display: block;
+    }
+    /* Horizontal scrollbar */
+    #hScrollbar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: calc(100% - 20px);
+      margin: 0 10px;
+    }
+    /* Vertical scrollbar */
+    #vScrollbar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: calc(100% - 20px);
+      height: 100%;
+      transform: rotate(270deg);
+      transform-origin: right top;
+      margin: 10px 0;
+    }
+    /* UI Panel styling */
+    .ui-panel {
+      background: #444;
+      padding: 10px 15px;
+      border-radius: 4px;
+      margin-top: 10px;
+      width: 1200px;
+      text-align: center;
+    }
+    .ui-panel label,
+    .ui-panel input,
+    .ui-panel button {
+      margin: 0 5px;
+    }
+    textarea {
+      width: 90%;
+      max-width: 1200px;
+      height: 150px;
+      display: block;
+      margin: 10px auto;
+      font-family: monospace;
+      border-radius: 4px;
+      padding: 5px;
+    }
+    /* Scrollbar thumb styling (for modern browsers) */
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      background: transparent;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 16px;
+      width: 16px;
+      background: #eee;
+      border: 2px solid #888;
+      border-radius: 50%;
+      cursor: pointer;
+      margin-top: -5px;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: #666;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+<h2>Spline Editor</h2>
+<div id="canvasContainer">
+  <canvas id="myCanvas" width="1200" height="500"></canvas>
+  <!-- Horizontal Scrollbar -->
+  <input type="range" id="hScrollbar" min="-1000" max="1000" value="0" step="1">
+  <!-- Vertical Scrollbar -->
+  <input type="range" id="vScrollbar" min="-1000" max="1000" value="0" step="1">
+</div>
+<div class="ui-panel">
+  <label for="coordX">x:</label>
+  <input type="text" id="coordX" size="5" />
+  <label for="coordY">y:</label>
+  <input type="text" id="coordY" size="5" />
+  <input type="checkbox" id="snap" checked />
+  <label for="snap">Snap to grid</label>
+  <label for="snapSlider">Snap Increment:</label>
+  <input type="range" id="snapSlider" min="0.01" max="0.2" step="0.01" value="0.05">
+  <span id="snapVal">0.05</span>
+</div>
+<!-- Reset Button -->
+<div id="resetSection" class="ui-panel">
+  <button id="resetButton">Reset to Initial State</button>
+</div>
+<!-- Combined output: first the fake comment (with one-line JSON) then the vector -->
+<div class="ui-panel">
+  <label>Combined Export (for copy/paste):</label>
+  <textarea id="combinedOutput" rows="8" readonly></textarea>
+</div>
+<!-- Import Section -->
+<div id="importSection" class="ui-panel">
+  <label>Import Data:</label>
+  <textarea id="importText" rows="5" placeholder="Paste JSON data here"></textarea>
+  <br>
+  <button id="loadButton">Load</button>
+</div>
+<script>
+  const canvas = document.getElementById("myCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const coordXField = document.getElementById("coordX");
+  const coordYField = document.getElementById("coordY");
+  const snapCheckbox = document.getElementById("snap");
+  const snapSlider = document.getElementById("snapSlider");
+  const snapValSpan = document.getElementById("snapVal");
+  const combinedOutput = document.getElementById("combinedOutput");
+  const importText = document.getElementById("importText");
+  const loadButton = document.getElementById("loadButton");
+  const resetButton = document.getElementById("resetButton");
+  const hScrollbar = document.getElementById("hScrollbar");
+  const vScrollbar = document.getElementById("vScrollbar");
+
+  // Update the snap increment display.
+  snapSlider.addEventListener("input", () => {
+    snapValSpan.textContent = snapSlider.value;
+  });
+
+  // --- Initial state data ---
+  const initialAnchors = [
+    { x: 0.0, y: 1.0 },
+    { x: 1.0, y: 0.0 }
+  ];
+  const initialControls = [
+    { x: (initialAnchors[0].x + initialAnchors[1].x) / 2, y: (initialAnchors[0].y + initialAnchors[1].y) / 2 }
+  ];
+
+  // Data Structures:
+  let anchors = JSON.parse(JSON.stringify(initialAnchors));
+  let controls = JSON.parse(JSON.stringify(initialControls));
+
+  // For dragging.
+  let selectedObject = null;
+  // Retain the last selection so that text field edits work even after mouseup.
+  let currentSelection = null;
+  let dragging = false;
+  let dragOffsets = null;
+
+  // For panning.
+  let panning = false;
+  let panStart = { x: 0, y: 0 };
+  let panScrollStart = { x: 0, y: 0 };
+
+  // For auto-scroll.
+  let lastMousePos = null;
+  const autoScrollMargin = 50;
+  const autoScrollFactor = 0.5;
+
+  // Deletion mode flag.
+  let deletionMode = false;
+
+  // Hit threshold (in canvas pixels).
+  const hitThreshold = 10;
+
+  // --- Snapping Helper ---
+  function snapValue(val) {
+    if (!snapCheckbox.checked) return val;
+    const inc = parseFloat(snapSlider.value);
+    return Math.round(val / inc) * inc;
+  }
+  function applySnap(pt) {
+    return { x: snapValue(pt.x), y: snapValue(pt.y) };
+  }
+
+  // --- Transformation Helpers ---
+  // Two rectangles: one for the full editor (canvas) and one for the “virtual” view.
+  const editorRect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+  const firstSecondRect = { x: 100, y: 100, w: canvas.width * 0.5, h: canvas.height * 0.5 };
+
+  function getTransformedRect() {
+    return {
+      x: firstSecondRect.x * squishX + scrollX,
+      y: firstSecondRect.y * squishY + scrollY,
+      w: firstSecondRect.w * squishX,
+      h: firstSecondRect.h * squishY
+    };
+  }
+  function normToCanvas(norm) {
+    const tRect = getTransformedRect();
+    return { x: tRect.x + norm.x * tRect.w, y: tRect.y + norm.y * tRect.h };
+  }
+  function canvasToNorm(pt) {
+    const tRect = getTransformedRect();
+    return { x: (pt.x - tRect.x) / tRect.w, y: (pt.y - tRect.y) / tRect.h };
+  }
+
+  // --- Utility Math ---
+  function midpoint(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+  function toPolar(dx, dy) {
+    return { distance: Math.sqrt(dx * dx + dy * dy), angle: Math.atan2(dy, dx) };
+  }
+  function fromPolar(distance, angle) {
+    return { dx: distance * Math.cos(angle), dy: distance * Math.sin(angle) };
+  }
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  // --- View Transformation Parameters ---
+  let scrollX = 0, targetScrollX = 0;
+  let scrollY = 0, targetScrollY = 0;
+  let squishX = 1, targetSquishX = 1;
+  let squishY = 1, targetSquishY = 1;
+
+  // --- Control Point Helpers ---
+  function resetControl(i) {
+    if (i < 0 || i >= controls.length) return;
+    if (anchors[i] && anchors[i+1]) {
+      controls[i] = {
+        x: (anchors[i].x + anchors[i+1].x) / 2,
+        y: (anchors[i].y + anchors[i+1].y) / 2
+      };
+    }
+  }
+  function updateControlsAfterAnchorChange(changedIndex) {
+    if (!dragOffsets) {
+      if (changedIndex > 0) resetControl(changedIndex - 1);
+      if (changedIndex < anchors.length - 1) resetControl(changedIndex);
+    }
+  }
+
+  // --- Inserting and Deleting Anchors ---
+  function insertAnchor(newAnchor) {
+    newAnchor = applySnap(newAnchor);
+    let idx = 0;
+    while (idx < anchors.length && anchors[idx].x < newAnchor.x) { idx++; }
+    anchors.splice(idx, 0, newAnchor);
+    selectedObject = { type: "anchor", index: idx };
+    currentSelection = selectedObject;
+    dragging = true;
+    updateCoordFields(newAnchor);
+    if (anchors.length === 1) {
+      controls = [];
+    } else if (anchors.length === 2) {
+      controls = [{ x: (anchors[0].x + anchors[1].x) / 2, y: (anchors[0].y + anchors[1].y) / 2 }];
+    } else {
+      if (idx === 0) {
+        controls.splice(0, 0, { x: (newAnchor.x + anchors[1].x) / 2, y: (newAnchor.y + anchors[1].y) / 2 });
+      } else if (idx === anchors.length - 1) {
+        controls.push({ x: (anchors[idx - 1].x + newAnchor.x) / 2, y: (anchors[idx - 1].y + newAnchor.y) / 2 });
+      } else {
+        controls.splice(idx - 1, 1);
+        controls.splice(idx - 1, 0,
+                { x: (anchors[idx - 1].x + newAnchor.x) / 2, y: (anchors[idx - 1].y + newAnchor.y) / 2 },
+                { x: (newAnchor.x + anchors[idx + 1].x) / 2, y: (newAnchor.y + anchors[idx + 1].y) / 2 }
+        );
+      }
+    }
+  }
+  function deleteAnchor(i) {
+    if (i < 0 || i >= anchors.length) return;
+    anchors.splice(i, 1);
+    if (anchors.length < 2) {
+      controls = [];
+    } else {
+      if (i === 0) {
+        controls.shift();
+      } else if (i === anchors.length) {
+        controls.pop();
+      } else {
+        controls.splice(i - 1, 2, {
+          x: (anchors[i - 1].x + anchors[i].x) / 2,
+          y: (anchors[i - 1].y + anchors[i].y) / 2
+        });
+      }
+    }
+    // Clear the selection if it was the one deleted.
+    if (currentSelection && currentSelection.index === i && currentSelection.type === "anchor") {
+      currentSelection = null;
+    }
+  }
+
+  // --- Grid Drawing ---
+  function drawGrid() {
+    const step = 0.1;
+    const tRect = getTransformedRect();
+    const gMinX = ((0 - scrollX) / squishX - firstSecondRect.x) / firstSecondRect.w;
+    const gMaxX = ((canvas.width - scrollX) / squishX - firstSecondRect.x) / firstSecondRect.w;
+    const gMinY = ((0 - scrollY) / squishY - firstSecondRect.y) / firstSecondRect.h;
+    const gMaxY = ((canvas.height - scrollY) / squishY - firstSecondRect.y) / firstSecondRect.h;
+    const startX = Math.floor(gMinX / step) * step;
+    const endX   = Math.ceil(gMaxX / step) * step;
+    const startY = Math.floor(gMinY / step) * step;
+    const endY   = Math.ceil(gMaxY / step) * step;
+    for (let gx = startX; gx <= endX + step/2; gx += step) {
+      const x_canvas = scrollX + squishX * (firstSecondRect.x + gx * firstSecondRect.w);
+      ctx.beginPath();
+      ctx.moveTo(x_canvas, 0);
+      ctx.lineTo(x_canvas, canvas.height);
+      if (Math.abs(gx - Math.round(gx)) < 0.001) {
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+      } else {
+        ctx.strokeStyle = 'rgba(200,200,200,0.1)';
+        ctx.lineWidth = 1;
+      }
+      ctx.stroke();
+      if (x_canvas >= tRect.x) {
+        ctx.font = '12px Segoe UI';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText(gx.toFixed(1), x_canvas + 2, tRect.y + tRect.h + 15);
+      }
+    }
+    for (let gy = startY; gy <= endY + step/2; gy += step) {
+      const y_canvas = scrollY + squishY * (firstSecondRect.y + gy * firstSecondRect.h);
+      ctx.beginPath();
+      ctx.moveTo(0, y_canvas);
+      ctx.lineTo(canvas.width, y_canvas);
+      if (Math.abs(gy - Math.round(gy)) < 0.001) {
+        ctx.strokeStyle = (Math.abs(gy) < 1e-3 || Math.abs(gy - 1) < 1e-3) ? '#ccc' : '#999';
+        ctx.lineWidth = 1;
+      } else {
+        ctx.strokeStyle = 'rgba(200,200,200,0.1)';
+        ctx.lineWidth = 1;
+      }
+      ctx.stroke();
+    }
+  }
+
+  // --- Animation of the Color Rect ---
+  function getScalarAtTime(time) {
+    if (anchors.length === 0) return 0;
+    if (time <= anchors[0].x) return anchors[0].y;
+    if (time >= anchors[anchors.length-1].x) return anchors[anchors.length-1].y;
+    for (let i = 0; i < controls.length; i++) {
+      let p0 = anchors[i], p1 = controls[i], p2 = anchors[i+1];
+      if (time >= p0.x && time <= p2.x) {
+        let A = p0.x - 2 * p1.x + p2.x;
+        let B = 2 * (p1.x - p0.x);
+        let C = p0.x - time;
+        let t = null;
+        if (Math.abs(A) < 1e-6) {
+          if (Math.abs(B) > 1e-6) t = -C / B;
+        } else {
+          let disc = B * B - 4 * A * C;
+          if (disc < 0) t = 0;
+          else {
+            let sqrtDisc = Math.sqrt(disc);
+            let t1 = (-B + sqrtDisc) / (2 * A);
+            let t2 = (-B - sqrtDisc) / (2 * A);
+            if (t1 >= 0 && t1 <= 1) t = t1;
+            else if (t2 >= 0 && t2 <= 1) t = t2;
+            else t = 0;
+          }
+        }
+        t = Math.max(0, Math.min(t, 1));
+        let y = (1-t)*(1-t)*p0.y + 2*(1-t)*t*p1.y + t*t*p2.y;
+        return y;
+      }
+    }
+    return 0;
+  }
+  function interpolateColor(scalar) {
+    const r = Math.round(lerp(255, 128, scalar));
+    const g = 0;
+    const b = Math.round(lerp(0, 128, scalar));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  // --- Drawing ---
+  function draw() {
+    // Clear with a dark background.
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#333";
+    ctx.fillRect(editorRect.x, editorRect.y, editorRect.w, editorRect.h);
+    drawGrid();
+    // Draw the spline if we have at least one control segment.
+    if (anchors.length > 0 && controls.length > 0) {
+      ctx.beginPath();
+      let start = normToCanvas(anchors[0]);
+      ctx.moveTo(start.x, start.y);
+      for (let i = 0; i < controls.length; i++) {
+        let cp = normToCanvas(controls[i]);
+        let end = normToCanvas(anchors[i + 1]);
+        ctx.quadraticCurveTo(cp.x, cp.y, end.x, end.y);
+      }
+      ctx.strokeStyle = "#0f0";
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(0,255,0,0.5)";
+      ctx.shadowBlur = 4;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // Draw anchors.
+    anchors.forEach(a => {
+      const pos = normToCanvas(a);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+    // Draw control points.
+    controls.forEach(cp => {
+      const pos = normToCanvas(cp);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#0f0";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+    // Draw sample points along the curve.
+    let fps_timestep = 1.0 / 60.0;
+    let x = 0;
+    for (let i = 0; i < controls.length; i++) {
+      let p0 = anchors[i], p1 = controls[i], p2 = anchors[i+1];
+      if (i === 0)
+        x = p0.x
+      for (; x <= p2.x; x += fps_timestep) {
+        let A = p0.x - 2 * p1.x + p2.x;
+        let B = 2 * (p1.x - p0.x);
+        let C = p0.x - x;
+        let t = null;
+        if (Math.abs(A) < 1e-6) {
+          if (Math.abs(B) > 1e-6) t = -C / B;
+        } else {
+          let disc = B * B - 4 * A * C;
+          if (disc < 0) continue;
+          let sqrtDisc = Math.sqrt(disc);
+          let t1 = (-B + sqrtDisc) / (2 * A);
+          let t2 = (-B - sqrtDisc) / (2 * A);
+          if (t1 >= 0 && t1 <= 1) t = t1;
+          else if (t2 >= 0 && t2 <= 1) t = t2;
+          else continue;
+        }
+        if (t === null || t < 0 || t > 1) continue;
+        let y = (1-t)*(1-t)*p0.y + 2*(1-t)*t*p1.y + t*t*p2.y;
+        let pt = normToCanvas({ x: x, y: y });
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = "red";
+        ctx.fill();
+      }
+    }
+    // Animate a color rectangle.
+    let totalDuration = anchors.length > 0 ? anchors[anchors.length - 1].x : 1;
+    if (totalDuration <= 0) totalDuration = 1;
+    let now = performance.now()/1000;
+    let currentTime = now % totalDuration;
+    let scalar = getScalarAtTime(currentTime);
+    let color = interpolateColor(scalar);
+    ctx.fillStyle = color;
+    ctx.fillRect(20, 20, 150, 50);
+    ctx.font = "16px Segoe UI";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(`t: ${currentTime.toFixed(2)} s`, 25, 45);
+    ctx.fillText(`v: ${scalar.toFixed(2)}`, 25, 65);
+  }
+
+  // --- Update coordinate text fields ---
+  function updateCoordFields(normPt) {
+    coordXField.value = normPt.x.toFixed(3);
+    coordYField.value = normPt.y.toFixed(3);
+  }
+
+  // --- Mouse Event Helpers ---
+  function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  function hitTest(normPt, mousePt) {
+    const pt = normToCanvas(normPt);
+    const dx = pt.x - mousePt.x, dy = pt.y - mousePt.y;
+    return Math.sqrt(dx * dx + dy * dy) < hitThreshold;
+  }
+
+  // --- Auto Scroll ---
+  function autoScroll(mouse) {
+    if (!mouse) return;
+    if (mouse.x < autoScrollMargin) {
+      targetScrollX += (autoScrollMargin - mouse.x) * autoScrollFactor;
+    }
+    if (mouse.x > canvas.width - autoScrollMargin) {
+      targetScrollX -= (mouse.x - (canvas.width - autoScrollMargin)) * autoScrollFactor;
+    }
+    if (mouse.y < autoScrollMargin) {
+      targetScrollY += (autoScrollMargin - mouse.y) * autoScrollFactor;
+    }
+    if (mouse.y > canvas.height - autoScrollMargin) {
+      targetScrollY -= (mouse.y - (canvas.height - autoScrollMargin)) * autoScrollFactor;
+    }
+  }
+
+  // --- Mouse Event Handlers ---
+  canvas.addEventListener("mousedown", (e) => {
+    const mouse = getMousePos(e);
+    lastMousePos = mouse;
+    if (e.button === 0) {
+      // First check control points.
+      for (let i = 0; i < controls.length; i++) {
+        if (hitTest(controls[i], mouse)) {
+          selectedObject = { type: "control", index: i };
+          currentSelection = selectedObject;
+          dragging = true;
+          updateCoordFields(controls[i]);
+          return;
+        }
+      }
+      // Then check anchors.
+      for (let i = 0; i < anchors.length; i++) {
+        if (hitTest(anchors[i], mouse)) {
+          selectedObject = { type: "anchor", index: i };
+          currentSelection = selectedObject;
+          dragging = true;
+          dragOffsets = {};
+          if (i > 0 && controls[i-1]) {
+            const oldMid = midpoint(anchors[i-1], anchors[i]);
+            const dx = controls[i-1].x - oldMid.x;
+            const dy = controls[i-1].y - oldMid.y;
+            dragOffsets.left = toPolar(dx, dy);
+          }
+          if (i < anchors.length-1 && controls[i]) {
+            const oldMid = midpoint(anchors[i], anchors[i+1]);
+            const dx = controls[i].x - oldMid.x;
+            const dy = controls[i].y - oldMid.y;
+            dragOffsets.right = toPolar(dx, dy);
+          }
+          updateCoordFields(anchors[i]);
+          return;
+        }
+      }
+      // If nothing hit, add a new anchor.
+      let norm = canvasToNorm(mouse);
+      norm = applySnap(norm);
+      insertAnchor(norm);
+    }
+    else if (e.button === 1) {
+      panning = true;
+      panStart = getMousePos(e);
+      panScrollStart = { x: targetScrollX, y: targetScrollY };
+    }
+    else if (e.button === 2) {
+      let hit = false;
+      for (let i = 0; i < anchors.length; i++) {
+        if (hitTest(anchors[i], mouse)) { hit = true; break; }
+      }
+      if (!hit) {
+        for (let i = 0; i < controls.length; i++) {
+          if (hitTest(controls[i], mouse)) { hit = true; break; }
+        }
+      }
+      if (!hit) { deletionMode = true; }
+    }
+  });
+
+  canvas.addEventListener("mousemove", (e) => {
+    const mouse = getMousePos(e);
+    lastMousePos = mouse;
+    if (deletionMode) {
+      for (let i = anchors.length - 1; i >= 0; i--) {
+        if (hitTest(anchors[i], mouse)) { deleteAnchor(i); }
+      }
+      for (let i = controls.length - 1; i >= 0; i--) {
+        if (hitTest(controls[i], mouse)) { resetControl(i); }
+      }
+    }
+    if (panning) {
+      const dx = mouse.x - panStart.x;
+      const dy = mouse.y - panStart.y;
+      targetScrollX = panScrollStart.x + dx;
+      targetScrollY = panScrollStart.y + dy;
+      return;
+    }
+    if (!dragging || !selectedObject) return;
+    let norm = canvasToNorm(mouse);
+    if (selectedObject.type === "anchor") {
+      norm = applySnap(norm);
+      const idx = selectedObject.index;
+      anchors[idx] = norm;
+      updateCoordFields(anchors[idx]);
+      if (dragOffsets && dragOffsets.left && idx > 0 && controls[idx-1]) {
+        const newMid = midpoint(anchors[idx-1], anchors[idx]);
+        const offset = fromPolar(dragOffsets.left.distance, dragOffsets.left.angle);
+        controls[idx-1] = { x: newMid.x + offset.dx, y: newMid.y + offset.dy };
+      }
+      if (dragOffsets && dragOffsets.right && idx < anchors.length-1 && controls[idx]) {
+        const newMid = midpoint(anchors[idx], anchors[idx+1]);
+        const offset = fromPolar(dragOffsets.right.distance, dragOffsets.right.angle);
+        controls[idx] = { x: newMid.x + offset.dx, y: newMid.y + offset.dy };
+      }
+      updateControlsAfterAnchorChange(idx);
+    }
+    else if (selectedObject.type === "control") {
+      controls[selectedObject.index] = norm;
+      updateCoordFields(controls[selectedObject.index]);
+    }
+    autoScroll(mouse);
+  });
+
+  document.addEventListener("mouseup", (e) => {
+    if (e.button === 2 && deletionMode) { deletionMode = false; }
+    if (panning && e.button === 1) { panning = false; }
+    dragging = false;
+    selectedObject = null; // Do not clear currentSelection so that text fields remain active.
+    dragOffsets = null;
+  });
+
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (deletionMode) return;
+    const mouse = getMousePos(e);
+    for (let i = 0; i < controls.length; i++) {
+      if (hitTest(controls[i], mouse)) { resetControl(i); return; }
+    }
+    for (let i = 0; i < anchors.length; i++) {
+      if (hitTest(anchors[i], mouse)) { deleteAnchor(i); return; }
+    }
+  });
+
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (e.ctrlKey) {
+      if (e.shiftKey) { targetSquishY = Math.max(squishY - e.deltaY * 0.001, 0.001); }
+      else { targetSquishX = Math.max(squishX - e.deltaY * 0.001, 0.001); }
+    } else {
+      if (e.shiftKey) { targetScrollY -= e.deltaY; }
+      else { targetScrollX += e.deltaY; }
+    }
+  });
+
+  // --- Update selected point from coordinate text fields ---
+  function updateSelectedFromFields() {
+    // Use the persistent currentSelection rather than the temporary selectedObject.
+    if (!currentSelection) return;
+    const newX = parseFloat(coordXField.value);
+    const newY = parseFloat(coordYField.value);
+    if (isNaN(newX) || isNaN(newY)) return;
+    const newPt = applySnap({ x: newX, y: newY });
+    if (currentSelection.type === "anchor") {
+      anchors[currentSelection.index] = newPt;
+      updateControlsAfterAnchorChange(currentSelection.index);
+    } else if (currentSelection.type === "control") {
+      controls[currentSelection.index] = newPt;
+    }
+  }
+  // Update on input for immediate response.
+  coordXField.addEventListener("input", updateSelectedFromFields);
+  coordYField.addEventListener("input", updateSelectedFromFields);
+
+  // --- Combined Export / Scalar Output Update ---
+  function updateCombinedOutput() {
+    const exportData = { anchors, controls };
+    // Produce a single-line JSON string.
+    const jsonStr = JSON.stringify(exportData);
+    let vectorOutput = "";
+    if (anchors.length >= 2) {
+      let samplePoints = [];
+      let startT = anchors[0].x;
+      let endT = anchors[anchors.length - 1].x;
+      let dt = 1 / 60;
+      for (let t = startT; t <= endT; t += dt) {
+        samplePoints.push(1.0 - parseFloat(getScalarAtTime(t).toFixed(3)));
+      }
+      vectorOutput = `std::vector<float> fls = { ${samplePoints.join(", ")} };`;
+    }
+    combinedOutput.value = `// ${jsonStr}\n${vectorOutput}`;
+  }
+
+  // --- Import Data Handling ---
+  loadButton.addEventListener("click", () => {
+    try {
+      const imported = JSON.parse(importText.value);
+      if (Array.isArray(imported.anchors)) { anchors = imported.anchors; }
+      else { alert("Imported data does not contain valid anchors."); return; }
+      if (Array.isArray(imported.controls)) { controls = imported.controls; }
+      else if (anchors.length > 1) {
+        controls = [];
+        for (let i = 0; i < anchors.length - 1; i++) {
+          controls.push({
+            x: (anchors[i].x + anchors[i+1].x) / 2,
+            y: (anchors[i].y + anchors[i+1].y) / 2
+          });
+        }
+      } else { controls = []; }
+    } catch (err) {
+      alert("Error parsing import data: " + err);
+    }
+  });
+
+  // --- Reset Button Handling ---
+  resetButton.addEventListener("click", () => {
+    anchors = JSON.parse(JSON.stringify(initialAnchors));
+    controls = JSON.parse(JSON.stringify(initialControls));
+    scrollX = targetScrollX = 0;
+    scrollY = targetScrollY = 0;
+    squishX = targetSquishX = 1;
+    squishY = targetSquishY = 1;
+    currentSelection = null;
+    // Reset scrollbars.
+    hScrollbar.value = 0;
+    vScrollbar.value = 0;
+  });
+
+  // --- Scrollbar Event Handling ---
+  hScrollbar.addEventListener("input", (e) => {
+    targetScrollX = parseInt(hScrollbar.value);
+  });
+  vScrollbar.addEventListener("input", (e) => {
+    targetScrollY = parseInt(vScrollbar.value);
+  });
+
+  // --- Continuous Animation Loop ---
+  function animate() {
+    // Smoothly update view transform.
+    scrollX += (targetScrollX - scrollX) * 0.2;
+    scrollY += (targetScrollY - scrollY) * 0.2;
+    squishX += (targetSquishX - squishX) * 0.2;
+    squishY += (targetSquishY - squishY) * 0.2;
+    // Update scrollbar slider positions (so they reflect programmatic changes).
+    hScrollbar.value = targetScrollX.toFixed(0);
+    vScrollbar.value = targetScrollY.toFixed(0);
+    draw();
+    updateCombinedOutput();
+    requestAnimationFrame(animate);
+  }
+  animate();
+</script>
+</body>
+</html>
