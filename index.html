@@ -333,10 +333,15 @@
         ctx.lineWidth = 1;
       }
       ctx.stroke();
-      if (x_canvas >= tRect.x) {
+      if (x_canvas >= tRect.x - 1) {
         ctx.font = '12px Segoe UI';
         ctx.fillStyle = '#ccc';
-        ctx.fillText(gx.toFixed(1), x_canvas + 2, tRect.y + tRect.h + 15);
+        console.log(gx);
+        if (gx > -.01 && gx < .01) {
+            ctx.fillText("0.0", x_canvas + 2, tRect.y + tRect.h + 15);
+        } else {
+            ctx.fillText(gx.toFixed(1), x_canvas + 2, tRect.y + tRect.h + 15);
+        }
       }
     }
     for (let gy = startY; gy <= endY + step/2; gy += step) {
