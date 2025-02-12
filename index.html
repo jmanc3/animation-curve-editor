@@ -62,6 +62,48 @@
     .ui-panel button {
       margin: 0 5px;
     }
+    .top-bar {
+      box-sizing: border-box;
+      background: #444;
+      width: 1200px;
+      padding: 10px;
+      margin-bottom: 1em;
+      border-radius: 6px;            /* round the corners */
+    }
+    .coord-group {
+      display: inline-flex;          /* lay out children in a row */
+      border: none;        /* outer border */
+      border-radius: 6px;            /* round the corners */
+      overflow: hidden;              /* clip children so they follow the rounded shape */
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);  /* drop shadow */
+      font-family: sans-serif;       /* (optional) set a nice font */
+      margin-right: 6px;
+    }
+
+    /* Remove individual borders and add padding */
+    .coord-group input,
+    .coord-group label {
+      padding: 0.5em;
+      border: none;
+      font-size: 1em;
+    }
+
+    .coord-group input {
+      width: 45px;
+    }
+
+    /* Remove the right border on the input and add a divider on the label */
+    .coord-group input {
+      outline: none;   /* remove default focus outline – you might add a custom focus style */
+    }
+
+    .coord-group label {
+      background: #333;   /* a slightly different background can help the label stand out */
+      border-left: 1px solid #333;  /* divider between the input and label */
+      width: 15px;
+      text-align: center;
+    }
+
     textarea {
       width: 90%;
       max-width: 1200px;
@@ -97,6 +139,18 @@
 </head>
 <body>
 <h2>Spline Editor</h2>
+
+<div class="top-bar">
+  <div class="coord-group">
+    <input type="text" id="coordX" size="5" />
+    <label for="coordX">x</label>
+  </div>
+  <div class="coord-group">
+    <input type="text" id="coordY" size="5" />
+    <label for="coordY">y</label>
+  </div>
+</div>
+
 <div id="canvasContainer">
   <canvas id="myCanvas" width="1200" height="500"></canvas>
   <!-- Horizontal Scrollbar -->
@@ -105,10 +159,6 @@
   <input type="range" id="vScrollbar" min="-1000" max="1000" value="0" step="1">
 </div>
 <div class="ui-panel">
-  <label for="coordX">x:</label>
-  <input type="text" id="coordX" size="5" />
-  <label for="coordY">y:</label>
-  <input type="text" id="coordY" size="5" />
   <input type="checkbox" id="snap" checked />
   <label for="snap">Snap to grid</label>
   <label for="snapSlider">Snap Increment:</label>
