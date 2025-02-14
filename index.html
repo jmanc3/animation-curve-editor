@@ -19,7 +19,7 @@
     #canvasContainer {
       position: relative;
       width: 1200px;
-      height: 500px;
+      height: 600px;
       background: #333;
       border: 1px solid #444;
       box-shadow: 0 4px 8px rgba(0,0,0,0.5);
@@ -143,7 +143,7 @@
     </div>
     <div class="coord-group">
       <label for="snapInput">Incr.</label>
-      <input type="text" id="snapInput" size="5" value="0.05" />
+      <input type="text" id="snapInput" size="5" value="0.025" />
     </div>
   </div>
 
@@ -185,7 +185,7 @@
 </div>
 
 <div id="canvasContainer">
-  <canvas id="myCanvas" width="1200" height="500"></canvas>
+  <canvas id="myCanvas" width="1200" height="600"></canvas>
 </div>
 
 <!-- Combined Export and Import Section -->
@@ -306,6 +306,9 @@
   let deletionMode = false;
   const hitThreshold = 10;
 
+  // NEW: Track the last mouse position for continuous auto-scrolling
+  let lastMousePos = null;
+
   // --- Snapping Helpers ---
   function snapValue(val) {
     if (!snapCheckbox.checked) return val;
@@ -318,7 +321,8 @@
 
   // --- Transformation Helpers ---
   const editorRect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
-  const firstSecondRect = { x: 100, y: 100, w: canvas.width * 0.5, h: canvas.height * 0.5 };
+  let off = .2;
+  const firstSecondRect = { x: 100, y: canvas.height * off, w: canvas.width * .65, h: canvas.height * (1 - (off * 2)) };
   function getTransformedRect() {
     return {
       x: firstSecondRect.x * squishX + scrollX,
@@ -584,25 +588,35 @@
     const dx = pt.x - mousePt.x, dy = pt.y - mousePt.y;
     return Math.sqrt(dx * dx + dy * dy) < hitThreshold;
   }
-  function autoScroll(mouse) {
-    if (!mouse) return;
+
+  // --- Auto-Scroll Function ---
+  // Now accepts a "multiplier" parameter so we can slow down the auto-scroll speed.
+  function autoScroll(mouse, multiplier = 0.5) {
+    if (!mouse) return false;
+    var happened = false;
     if (mouse.x < 50) {
-      targetScrollX += (50 - mouse.x) * 0.5;
+      targetScrollX += ((50 - mouse.x) / 50) * multiplier;
+      happened = true;
     }
     if (mouse.x > canvas.width - 50) {
-      targetScrollX -= (mouse.x - (canvas.width - 50)) * 0.5;
+      targetScrollX -= ((mouse.x - (canvas.width - 50)) / 50) * multiplier;
+      happened = true;
     }
     if (mouse.y < 50) {
-      targetScrollY += (50 - mouse.y) * 0.5;
+      targetScrollY += ((50 - mouse.y) / 50) * (multiplier * .7);
+      happened = true;
     }
     if (mouse.y > canvas.height - 50) {
-      targetScrollY -= (mouse.y - (canvas.height - 50)) * 0.5;
+      targetScrollY -= ((mouse.y - (canvas.height - 50)) / 50) * (multiplier * .7);
+      happened = true;
     }
+    return happened;
   }
 
   // --- Mouse Event Handlers ---
   canvas.addEventListener("mousedown", (e) => {
     const mouse = getMousePos(e);
+    lastMousePos = mouse; // update last known mouse position
     if (e.button === 0) {
       // Left button: Check if we hit a control or anchor.
       for (let i = 0; i < controls.length; i++) {
@@ -659,6 +673,7 @@
   });
   canvas.addEventListener("mousemove", (e) => {
     const mouse = getMousePos(e);
+    lastMousePos = mouse; // keep updating the last mouse position
     if (deletionMode) {
       for (let i = anchors.length - 1; i >= 0; i--) {
         if (hitTest(anchors[i], mouse)) { deleteAnchor(i); }
@@ -696,7 +711,7 @@
       controls[selectedObject.index] = norm;
       updateCoordFields(controls[selectedObject.index]);
     }
-    autoScroll(mouse);
+    autoScroll(mouse); // normal auto-scroll on mousemove with default multiplier (0.5)
   });
   document.addEventListener("mouseup", (e) => {
     if (e.button === 2 && deletionMode) { deletionMode = false; }
@@ -704,6 +719,7 @@
     dragging = false;
     selectedObject = null;
     dragOffsets = null;
+    lastMousePos = null; // clear the last mouse position when mouse is up
     recordHistory();
   });
   canvas.addEventListener("contextmenu", (e) => {
@@ -728,6 +744,8 @@
         const normY = (mouseY - tRect.y) / tRect.h;
         const newSquishY = Math.max(squishY - e.deltaY * 0.001, 0.001);
         targetSquishY = newSquishY;
+        if (targetSquishY < .1)
+          targetSquishY = .1
         targetScrollY = mouseY - firstSecondRect.y * newSquishY - normY * (firstSecondRect.h * newSquishY);
       } else {
         const mouseX = e.clientX - canvas.getBoundingClientRect().left;
@@ -735,6 +753,8 @@
         const normX = (mouseX - tRect.x) / tRect.w;
         const newSquishX = Math.max(squishX - e.deltaY * 0.001, 0.001);
         targetSquishX = newSquishX;
+        if (targetSquishX < .1)
+          targetSquishX = .1
         targetScrollX = mouseX - firstSecondRect.x * newSquishX - normX * (firstSecondRect.w * newSquishX);
       }
     } else {
@@ -885,6 +905,36 @@
 
   // --- Animation Loop ---
   function animate() {
+    // If dragging and we have a last mouse position, auto-scroll continuously
+    if (dragging && lastMousePos) {
+      // Use a lower multiplier for continuous auto-scroll
+      let auto = autoScroll(lastMousePos, 5.5);
+      if (auto) {
+        const mouse = lastMousePos;
+        lastMousePos = mouse; // keep updating the last mouse position
+        let norm = canvasToNorm(mouse);
+        if (selectedObject.type === "anchor") {
+          // norm = applySnap(norm);
+          const idx = selectedObject.index;
+          anchors[idx] = norm;
+          updateCoordFields(anchors[idx]);
+          if (dragOffsets && dragOffsets.left && idx > 0 && controls[idx - 1]) {
+            const newMid = midpoint(anchors[idx - 1], anchors[idx]);
+            const offset = fromPolar(dragOffsets.left.distance, dragOffsets.left.angle);
+            controls[idx - 1] = {x: newMid.x + offset.dx, y: newMid.y + offset.dy};
+          }
+          if (dragOffsets && dragOffsets.right && idx < anchors.length - 1 && controls[idx]) {
+            const newMid = midpoint(anchors[idx], anchors[idx + 1]);
+            const offset = fromPolar(dragOffsets.right.distance, dragOffsets.right.angle);
+            controls[idx] = {x: newMid.x + offset.dx, y: newMid.y + offset.dy};
+          }
+          updateControlsAfterAnchorChange(idx);
+        } else if (selectedObject.type === "control") {
+          controls[selectedObject.index] = norm;
+          updateCoordFields(controls[selectedObject.index]);
+        }
+      }
+    }
     scrollX += (targetScrollX - scrollX) * 0.2;
     scrollY += (targetScrollY - scrollY) * 0.2;
     squishX += (targetSquishX - squishX) * 0.2;
