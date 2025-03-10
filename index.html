@@ -3,8 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spline Editor with Transformations, Undo/Redo, and Export</title>
+
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="Animation Curve Editor with Transformations, Undo/Redo, and Export functionalities. Seamlessly create and manipulate spline curves with our intuitive web interface." />
+  <meta name="keywords" content="Animation Curve Editor, Curve Editor, Lerp, Lerp Editor, Scalar, Scalar Editor, Scalar Animation Editor, Animation Curve Tool, Tool, Lerp Curve Tool, Spline Editor" />
+  <meta name="robots" content="index, follow" />
+
+  <!-- Open Graph Meta Tags for social sharing -->
+  <meta property="og:title" content="Animation Curve Editor with Transformations, Undo/Redo, and Export" />
+  <meta property="og:description" content="Seamlessly create and manipulate spline curves with our intuitive web-based editor that supports transformations, undo/redo, and export functionality." />
+  <meta property="og:type" content="website" />
+
+  <title>Animation Curve Editor</title>
+
+  <!-- Structured Data for search engines -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Animation Curve Editor",
+      "operatingSystem": "All",
+      "applicationCategory": "GraphicsApplication",
+      "description": "A web-based animation curve editor offering advanced transformations, undo/redo capabilities, and export options.",
+      "url": "https://jmanc3.github.io/animation-curve-editor"
+    }
+  </script>
+
   <style>
+    /* Existing styles remain unchanged */
     body {
       background: #222;
       color: #eee;
@@ -123,83 +149,84 @@
   </style>
 </head>
 <body>
-<!-- First top bar: Coordinate fields, Snap/Incr, Reset -->
-<div class="top-bar">
-  <div>
-    <div class="coord-group">
-      <input type="text" id="coordX" size="5" />
-      <label for="coordX">x</label>
+<header>
+  <h1>Animation Curve Editor</h1>
+  <!-- First top bar: Coordinate fields, Snap/Incr, Reset -->
+  <div class="top-bar">
+    <div>
+      <div class="coord-group">
+        <input type="text" id="coordX" size="5" />
+        <label for="coordX">x</label>
+      </div>
+      <div class="coord-group">
+        <input type="text" id="coordY" size="5" />
+        <label for="coordY">y</label>
+      </div>
+    </div>
+    <div>
+      <div class="coord-group">
+        <input type="checkbox" id="snap" checked />
+        <label for="snap">Snap</label>
+      </div>
+      <div class="coord-group">
+        <label for="snapInput">Incr.</label>
+        <input type="text" id="snapInput" size="5" value="0.025" />
+      </div>
     </div>
     <div class="coord-group">
-      <input type="text" id="coordY" size="5" />
-      <label for="coordY">y</label>
-    </div>
-  </div>
-
-  <div>
-    <div class="coord-group">
-      <input type="checkbox" id="snap" checked />
-      <label for="snap">Snap</label>
-    </div>
-    <div class="coord-group">
-      <label for="snapInput">Incr.</label>
-      <input type="text" id="snapInput" size="5" value="0.025" />
-    </div>
-  </div>
-
-  <div class="coord-group">
-    <button id="resetButton">Reset</button>
-  </div>
-</div>
-
-<!-- Second top bar: Undo/Redo, Scale Factor, and Transform Buttons -->
-<div class="top-bar">
-  <div class="undo-redo-group">
-    <div class="coord-group">
-      <button id="undoButton">Undo</button>
-    </div>
-    <div class="coord-group">
-      <button id="redoButton">Redo</button>
+      <button id="resetButton">Reset</button>
     </div>
   </div>
-  <div class="scale-group">
-    <div class="coord-group">
-      <input type="text" id="scaleInput" placeholder="Scale factor" />
-      <button id="scaleAxisToggle">x</button>
+  <!-- Second top bar: Undo/Redo, Scale Factor, and Transform Buttons -->
+  <div class="top-bar">
+    <div class="undo-redo-group">
+      <div class="coord-group">
+        <button id="undoButton">Undo</button>
+      </div>
+      <div class="coord-group">
+        <button id="redoButton">Redo</button>
+      </div>
     </div>
-    <div class="coord-group">
-      <button id="applyScaleButton">Apply Scale Factor</button>
+    <div class="scale-group">
+      <div class="coord-group">
+        <input type="text" id="scaleInput" placeholder="Scale factor" />
+        <button id="scaleAxisToggle">x</button>
+      </div>
+      <div class="coord-group">
+        <button id="applyScaleButton">Apply Scale Factor</button>
+      </div>
+    </div>
+    <div class="transform-group">
+      <div class="coord-group">
+        <button id="flipHorizontalButton">Flip Horizontal</button>
+      </div>
+      <div class="coord-group">
+        <button id="flipVerticalButton">Flip Vertical</button>
+      </div>
+      <div class="coord-group">
+        <button id="mirrorAfterEndButton">Mirror After End</button>
+      </div>
     </div>
   </div>
-  <div class="transform-group">
-    <div class="coord-group">
-      <button id="flipHorizontalButton">Flip Horizontal</button>
-    </div>
-    <div class="coord-group">
-      <button id="flipVerticalButton">Flip Vertical</button>
-    </div>
-    <div class="coord-group">
-      <button id="mirrorAfterEndButton">Mirror After End</button>
-    </div>
+</header>
+<main>
+  <div id="canvasContainer">
+    <canvas id="myCanvas" width="1200" height="600">
+      Your browser does not support the canvas element.
+    </canvas>
   </div>
-</div>
-
-<div id="canvasContainer">
-  <canvas id="myCanvas" width="1200" height="600"></canvas>
-</div>
-
-<!-- Combined Export and Import Section -->
-<div class="ui-panel">
-  <label>Combined Export (for copy/paste):</label>
-  <textarea id="combinedOutput" rows="8" readonly></textarea>
-</div>
-<div id="importSection" class="ui-panel">
-  <label>Import Data:</label>
-  <textarea id="importText" rows="5" placeholder="Paste JSON data here"></textarea>
-  <br>
-  <button id="loadButton">Load</button>
-</div>
-
+  <!-- Combined Export and Import Section -->
+  <div class="ui-panel">
+    <label>Combined Export (for copy/paste):</label>
+    <textarea id="combinedOutput" rows="8" readonly></textarea>
+  </div>
+  <div id="importSection" class="ui-panel">
+    <label>Import Data:</label>
+    <textarea id="importText" rows="5" placeholder="Paste JSON data here"></textarea>
+    <br>
+    <button id="loadButton">Load</button>
+  </div>
+</main>
 <script>
   // Canvas and UI elements
   const canvas = document.getElementById("myCanvas");
